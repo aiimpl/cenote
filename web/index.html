@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Cenote</title>
+<meta name="description" content="A flooded cave lit by one hole in the roof, seen from under the water. The shafts of light are computed live. Touch the surface to bend them. three.js, nothing pre-rendered.">
+<meta property="og:title" content="Cenote">
+<meta property="og:description" content="A flooded cave lit by one hole in the roof. Touch the surface to bend the light.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 16 16%22%3E%3Crect width=%2216%22 height=%2216%22 rx=%224%22 fill=%22%230a5b6a%22/%3E%3Cpath d=%22M2 10c2-3 4-3 6 0s4 3 6 0%22 stroke=%22%23bff6ff%22 stroke-width=%221.6%22 fill=%22none%22 stroke-linecap=%22round%22/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  html, body { margin: 0; height: 100%; background: #01060c; overflow: hidden; touch-action: none; overscroll-behavior: none; }
+  body { color: #e6f1ff; font: 500 13px/1.4 Inter, system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+  #c { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: crosshair; }
+  .ui { position: absolute; left: 50%; bottom: max(16px, env(safe-area-inset-bottom)); transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 9px; pointer-events: none; }
+  .seg { pointer-events: auto; display: flex; gap: 2px; padding: 3px; border-radius: 999px; background: rgba(4,10,20,.42); border: 1px solid rgba(160,210,255,.16); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
+  .seg button { font: inherit; color: rgba(230,241,255,.72); background: none; border: 0; border-radius: 999px; padding: 7px 15px; cursor: pointer; }
+  .seg button.on { color: #04101e; background: rgba(214,236,255,.92); }
+  #hint { color: rgba(230,241,255,.62); font-size: 12px; text-shadow: 0 1px 6px rgba(0,0,0,.6); transition: opacity .6s; }
+  .src { position: absolute; right: 12px; top: max(10px, env(safe-area-inset-top)); color: rgba(230,241,255,.45); font-size: 11.5px; text-decoration: none; }
+  body.film .ui, body.film .src { display: none; }
+  body.film #c { cursor: none; }
+</style>
+<script type="importmap">{ "imports": { "three": "./vendor/three/build/three.module.js" } }</script>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="ui">
+  <div class="seg"><button id="b-up">Look up</button><button id="b-down">Look down</button></div>
+  <div id="hint">Touch the surface above</div>
+</div>
+<a class="src" href="https://github.com/aiimpl/cenote" target="_blank" rel="noopener">source</a>
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>
