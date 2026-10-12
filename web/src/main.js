@@ -85,7 +85,7 @@ const SHOTS = [
   { t0: 0, bub: [-0.4, -0.3, -14], f: (u) => look(lerp([0.9, -11.6, 0.8], [0.6, -11.2, 0.5], u / 3), [-2.6, -0.5, -2]) },               // looking up into the beams
   { t0: 10, exp: 1.5, bub: [-7.0, -6.6, -16], f: (u) => look(lerp([-8.6, -5.4, -8.2], [-8.0, -7.6, -7.6], ease(u / 3)), [-3.4, -10.8, -3.0]) },             // sinking alongside the light, down to where it lands
   { t0: 20, bub: [2.0, 1.5, -15], f: (u) => look(lerp([3.5, -13.2, 3], [3.1, -13.1, 2.6], u / 3), [-2.6, -4, -2.2]) },              // from the rocks below, up the beams
-  { t0: 30, exp: 0.8, bub: [-0.35, -0.65, -8], f: (u) => look(lerp([-0.6, -7, -0.4], [-0.6, -7.3, -0.4], u / 3), [-2.1, 1, -2.4], 0.25 * u) },   // straight up: the window of daylight
+  { t0: 30, exp: 0.8, bub: [-1.0, -1.1, -8.2], f: (u) => look(lerp([-0.6, -7, -0.4], [-0.6, -7.3, -0.4], u / 3), [-2.1, 1, -2.4], 0.25 * u) },   // straight up: the window of daylight
   { t0: 1.5, bub: [-0.4, -0.3, -14], f: (u) => look(lerp([0.8, -11.5, 0.7], [0.5, -11.1, 0.4], u / 3), [-2.6, -0.5, -2]) },           // back to the opening
 ];
 const SHOT_LEN = 3, FILM_LEN = SHOTS.length * SHOT_LEN;

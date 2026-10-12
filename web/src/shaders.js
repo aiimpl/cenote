@@ -217,6 +217,23 @@ vec3 veil(vec3 ro, vec3 rd, float tMax, float jit){
   return s + T * AMB * 0.4;
 }
 
+// what the mirror of a bubble at p shows in direction r: the round window of daylight above, the bright hole in it,
+// a glint of the sun, the blue haze sideways and the dark cave below
+vec3 bubEnv(vec3 p, vec3 r){
+  vec3 hd = normalize(-p);
+  float ang = atan(HOLE * 1.2 / max(length(p), 0.5));
+  float hole = smoothstep(cos(ang) - 0.04, cos(ang) + 0.02, dot(r, hd));
+  vec3 Tp = exp(-SIGT * length(p));
+  vec2 u0;
+  vec3 Ls = sunAt(p, u0);
+  // the lit water around it: brightest towards the sun, where the shafts come from
+  vec3 e = mix(AMB * 0.15, AMB * 4. + skyAt(p) * 3. + Ls * (0.15 + 0.9 * pow(max(dot(r, -sunUnder()), 0.), 6.)), smoothstep(-0.2, 0.7, r.y));
+  e += vec3(3., 3.4, 3.7) * Tp * hole * smoothstep(0.55, 0.8, r.y);
+  vec2 u;
+  e += sunAt(p, u) * (pow(max(dot(r, -sunUnder()), 0.), 900.) * 6. + pow(max(dot(r, -sunUnder()), 0.), 40.) * 0.25);   // the sun itself: a hard glint and a soft sheen
+  return e;
+}
+
 // the floor: a mound of fallen roof under the hole, on a limestone floor
 float floorH(vec2 p){
   float m = 6.5 * exp(-dot(p - vec2(-1.5, -1.), p - vec2(-1.5, -1.)) / 45.);
@@ -356,44 +373,61 @@ void main(){
       else { cell.z += st.z; tN.z += tD.z; }
     }
   }
-  // bubbles rising from a diver below, wobbling, in little bursts
+  // bubbles from a diver below, one burst per breath: a big wobbling cap or two, a few zigzagging lentils, a cloud of
+  // tiny ones. Seen from the water a bubble is a mirror wherever the ray meets it at more than 48.6 degrees (total
+  // reflection), so it shows the bright surface and the hole above, silver on top and dark below
   if (uBub.w > 0.){
-    float best = 1e9; vec3 bc = vec3(0.), bS = vec3(1.); float br = 0.;
-    for (int i = 0; i < 28; i++){
+    float best = 1e9, brim = 0.; vec3 bn = vec3(0.), bp = vec3(0.);
+    vec3 dots = vec3(0.);
+    for (int i = 0; i < 48; i++){
       float fi = float(i);
-      float burst = floor(fi / 7.);
-      float v = 0.55 + 0.25 * hash12(vec2(fi, 3.));
-      float L = -uBub.z + 0.2;
-      float y = uBub.z + mod(uT * v + burst * L * 0.27 + 0.12 * hash12(vec2(fi, 9.)), L);
-      float up = y - uBub.z;
-      float r = (0.01 + 0.022 * hash12(vec2(fi, 5.))) * (1. + up * 0.03);     // they grow as they rise
-      vec3 c = vec3(uBub.x, y, uBub.y) + vec3(0.06 * sin(uT * 7. * v + fi * 2.), 0., 0.06 * cos(uT * 6. * v + fi * 3.))
-             + vec3(hash12(vec2(fi, 1.)) - 0.5, 0., hash12(vec2(fi, 2.)) - 0.5) * (0.12 + up * 0.02);
-      // the bigger ones flatten into wobbling caps
-      float sq = 1. - 0.35 * smoothstep(0.012, 0.035, r) * (0.8 + 0.2 * sin(uT * 9. + fi));
+      float b = floor(fi / 12.), j = mod(fi, 12.);
+      float age = mod(uT + b * 4.1 + 1.3, 16.4);                 // a burst every 4.1 s
+      float h1 = hash12(vec2(fi, 3.)), h2 = hash12(vec2(fi, 7.)), h3 = hash12(vec2(fi, 11.));
+      float cls = j < 1.5 ? 2. : (j < 7. ? 1. : 0.);              // 2 cap, 1 lentil, 0 tiny
+      float v = cls == 2. ? 0.42 + 0.08 * h1 : (cls == 1. ? 0.27 + 0.06 * h1 : 0.17 + 0.06 * h1);
+      float r = cls == 2. ? 0.022 + 0.018 * h2 : (cls == 1. ? 0.005 + 0.005 * h2 : 0.0012 + 0.0015 * h2);
+      vec3 c = vec3(uBub.x, uBub.z + age * v, uBub.y);
+      vec2 dir = vec2(cos(6.283 * h3), sin(6.283 * h3));
+      c.xz += dir * (0.02 + 0.035 * age) * (0.4 + h2) + vec2(0.04 * (b - 1.5), 0.03 * mod(b, 2.));   // the cloud spreads as it rises
+      if (cls == 1.){ float z = sin(age * 25. + fi * 2.); c.xz += vec2(-dir.y, dir.x) * 0.012 * z; }   // zigzag
+      if (cls == 2.) c.xz += 0.02 * vec2(sin(age * 2.3 + fi), cos(age * 1.9 + fi));
+      if (c.y > -0.04) continue;
+      float t0 = dot(c - ro, rd);
+      if (t0 < 0.05 || t0 > tEnd) continue;
+      if (cls == 0.){
+        // tiny ones: specks of silver
+        float d = length(ro + rd * t0 - c);
+        float blur = max(pa * t0 * 0.8, r);
+        dots += (r * r) / (blur * blur) * exp(-d * d / (blur * blur)) * exp(-SIGT * t0) * smoothstep(-0.04, -0.3, c.y);
+        continue;
+      }
+      // lentils are squashed spheres that rock; caps are domes with a flat, rippling underside
+      float sq = cls == 2. ? 0.5 + 0.07 * sin(age * 14. + fi) : 0.65 + 0.08 * sin(age * 31. + fi);   // caps are squat, lentils rock
       vec3 S = vec3(1., 1. / sq, 1.);
       vec3 oc = (ro - c) * S, rs = rd * S;
       float aa = dot(rs, rs), bb = dot(oc, rs), cc = dot(oc, oc) - r * r;
       float disc = bb * bb - aa * cc;
-      if (disc > 0. && y < -0.05){
-        float t = (-bb - sqrt(disc)) / aa;
-        if (t > 0.05 && t < best && t < tEnd){ best = t; bc = c; br = r; bS = S; }
-      }
+      if (disc <= 0.) continue;
+      float tN = (-bb - sqrt(disc)) / aa, tF = (-bb + sqrt(disc)) / aa;
+      float t = tN; vec3 n = normalize((ro + rd * t - c) * S * S);
+      // the surface trembles: a few moving bumps on the normal instead of a perfect ellipsoid
+      vec3 lq = (ro + rd * t - c) / r;
+      n = normalize(n + (cls == 2. ? 0.12 : 0.06) * vec3(sin(lq.y * 4. + age * 13. + fi), sin(lq.z * 5. - age * 11.), sin(lq.x * 4. + age * 9.)));
+      if (t > 0.05 && t < best && t < tEnd){ best = t; bn = n; bp = c; }
     }
     if (best < 1e8){
-      vec3 nb = normalize((ro + rd * best - bc) * bS * bS);
-      float cs = max(dot(nb, -rd), 0.);
-      vec2 u;
-      vec3 env = sunAt(bc, u) * 0.3 + skyAt(bc) * 2. + AMB * 4.;
-      // seen from the water, a bubble is a mirror at its edge (total reflection), a lens in the middle,
-      // with a dark ring between, and a hot spot where it faces the window above
-      float rim = smoothstep(0.42, 0.08, cs);
-      float ring = smoothstep(0.3, 0.45, cs) * smoothstep(0.75, 0.5, cs);
-      float top = pow(max(dot(nb, normalize(vec3(-bc.x, -bc.y, -bc.z) * 0.1 + vec3(0., 1., 0.))), 0.), 24.);
-      vec3 mir = env + vec3(0.25, 0.4, 0.5) * (0.3 + 0.7 * smoothstep(-0.3, 0.8, nb.y));   // the edge mirrors the bright water and the window
-      vec3 bub = col * (0.8 - 0.5 * ring) + mir * (0.08 + rim * 1.8) + env * top * 6.;
-      col = mix(col, bub, uBub.w);
+      float cs = max(dot(bn, -rd), 0.);
+      // past the critical angle (cos 0.66) everything is reflected: the outer quarter of the radius is a mirror ring
+      float F = mix(0.02 + 0.98 * pow(clamp((1. - cs) / 0.34, 0., 1.), 8.), 1., smoothstep(0.68, 0.64, cs));
+      // through the middle: a small, upside-down picture of everything around, mostly the bright water above
+      // through the middle it is clear: the water behind, a little brighter
+      vec3 core = col * 1.08 + bubEnv(bp, rd) * 0.04;
+      vec3 B = mix(core, bubEnv(bp, reflect(rd, bn)), F);
+      vec3 Tb = exp(-SIGT * best);
+      col = mix(col, B * Tb + col * (1. - Tb), uBub.w);
     }
+    col += dots * (vec3(2., 2.5, 3.) + skyAt(vec3(uBub.x, -6., uBub.y)) * 4.) * uBub.w;
   }
   if (uDbg == 1) col = vec3(textureLod(uCaus, vUv, 0.).r * 0.2);
   outColor = vec4(col, 1.);     // linear; bloom and tone mapping happen in post
