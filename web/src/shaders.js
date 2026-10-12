@@ -63,14 +63,14 @@ vec3 noised(vec2 x){
 // the water in a cave is sheltered: only a slow, faint ripple from the air coming down the hole
 vec3 calm(vec2 p){
   vec3 r = vec3(0.);
-  float amp = 0.012, sc = 1.3;
+  float amp = 0.026, sc = 1.1;
   for (int o = 0; o < 4; o++){
     float fo = float(o);
     for (int l = 0; l < 2; l++){
       float fl = float(l);
       float th = fo * 1.13 + fl * 2.1;
       mat2 R = mat2(cos(th), -sin(th), sin(th), cos(th));
-      vec2 v = vec2(cos(th + 1.9), sin(th + 1.9)) * (0.12 + 0.1 * fl) * sqrt(1.3 / sc);
+      vec2 v = vec2(cos(th + 1.9), sin(th + 1.9)) * (0.22 + 0.14 * fl) * sqrt(1.3 / sc);
       vec3 n = noised(R * p * sc + v * uT * sc + fo * 17.3 + fl * 5.1);
       r.x += amp * (n.x - 0.5);
       r.yz += amp * sc * (n.yz * R);
@@ -158,21 +158,29 @@ uniform vec3 uCam;
 uniform vec4 uBox;
 uniform sampler2D uCaus;
 uniform int uSteps;
+uniform int uSpk;          // grid cells walked for the specks near the lens
 uniform int uDbg;
+uniform vec4 uBub;          // a column of rising bubbles: x, z, the depth they start from, strength
 in vec2 vUv;
 out vec4 outColor;
 
 const vec3 SUN = vec3(1.0, 0.96, 0.88) * 9.;
 const vec3 SIGA = vec3(0.36, 0.085, 0.03);     // absorption: red goes first
-const float SIGS = 0.03;                        // scattering (very clear water)
+const float SIGS = 0.045;                       // scattering (very clear water)
 const vec3 SIGT = SIGA + SIGS;
-const vec3 AMB = vec3(0.008, 0.03, 0.065);      // the cave's own dim blue light
+const vec3 AMB = vec3(0.006, 0.022, 0.06);      // the cave's own dim blue light
+const vec3 SKY = vec3(2.6, 3.1, 3.6);           // daylight from the open hole, the whole sky not just the sun
+
+float hg(float c, float g){ return (1. - g * g) / (4. * PI * pow(1. + g * g - 2. * g * c, 1.5)); }
 
 // light arriving at a point under the water from the sun through the hole
 float lightMap(vec2 u, float depth){
   vec2 uv = (u - uBox.xy) / (uBox.zw - uBox.xy);
   float lod = clamp(log2(max(depth, 0.1) / D) * 0.35, 0., 1.);
   float c = textureLod(uCaus, uv, lod).r;
+  // deep down the net of light has spread into soft, slow ripples: blend towards a blurred level
+  float far = smoothstep(5., 12., depth);
+  if (far > 0.) c = mix(c, textureLod(uCaus, uv, 2.6).r * 0.7 + textureLod(uCaus, uv, 1.6).r * 0.3, far * 0.8);
   if (uv.x < 0. || uv.y < 0. || uv.x > 1. || uv.y > 1.) c = 0.;
   float flat0 = sunlit(u);
   return mix(flat0, c, smoothstep(0.2, D, depth));
@@ -183,6 +191,30 @@ vec3 sunAt(vec3 x, out vec2 u){
   float len = depth / -r0.y;
   u = x.xz - r0.xz * len;
   return SUN * lightMap(u, depth) * exp(-SIGT * len);
+}
+
+// the soft daylight of the open hole, everywhere in the cave: falls off with the solid angle of the hole and the water in between
+vec3 skyAt(vec3 x){
+  vec3 d = x - vec3(0., 0., 0.);
+  float r2 = dot(d, d);
+  float om = HOLE * HOLE / (HOLE * HOLE + r2);
+  return SKY * om * exp(-SIGT * sqrt(r2));
+}
+// light scattered towards the eye along a short ray (for the mirror on the underside of the surface)
+vec3 veil(vec3 ro, vec3 rd, float tMax, float jit){
+  vec3 r0 = sunUnder();
+  float ph = (hg(dot(r0, -rd), 0.85) * 0.7 + 0.3 / (4. * PI) * 2.5) * 1.8;
+  vec3 T = vec3(1.), s = vec3(0.);
+  int N = uSteps / 8 + 2;
+  float dt = tMax / float(N);
+  for (int i = 0; i < 16; i++){
+    if (i >= N) break;
+    vec3 x = ro + rd * (float(i) + jit) * dt;
+    vec2 u;
+    s += T * (sunAt(x, u) * ph + skyAt(x) * 0.08 + AMB * 0.25) * SIGS * dt;
+    T *= exp(-SIGT * dt);
+  }
+  return s + T * AMB * 0.4;
 }
 
 // the floor: a mound of fallen roof under the hole, on a limestone floor
@@ -200,8 +232,6 @@ vec3 rockAlbedo(vec3 x){
   vec3 a = mix(vec3(0.42, 0.40, 0.34), vec3(0.78, 0.75, 0.66), n);
   return a * (0.85 + 0.3 * vnoise(x.xz * 30. + x.y * 9.));
 }
-float hg(float c, float g){ return (1. - g * g) / (4. * PI * pow(1. + g * g - 2. * g * c, 1.5)); }
-vec3 aces(vec3 x){ return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0., 1.); }
 
 void main(){
   vec4 a = uInvVP * vec4(vUv * 2. - 1., -1., 1.); a /= a.w;
@@ -243,7 +273,7 @@ void main(){
     // fine particles drifting in the water catch the light
     float sp = vnoise3(x * 9. + vec3(0., uT * 0.05, uT * 0.03));
     float dens = SIGS * (1. + 10. * pow(sp, 16.));
-    sc += T * (Ls * ph + AMB * 0.25) * dens * dt;
+    sc += T * (Ls * ph + skyAt(x) * 0.08 + AMB * 0.25) * dens * dt;
     T *= exp(-SIGT * dt);
   }
 
@@ -255,7 +285,8 @@ void main(){
     vec3 n = normalize(vec3(-w.y, 1., -w.z));
     vec3 tr = refract(rd, -n, 1.333);
     if (dot(tr, tr) < 1e-4){
-      col = AMB * 0.55 + SUN * 0.001 * sunlit(x.xz);   // total reflection: the dark cave below, mirrored
+      // total reflection: the surface is a wavering mirror of the lit water below
+      col = veil(x, reflect(rd, n), 22., jit);
     } else {
       float F = 0.02 + 0.98 * pow(1. - abs(dot(rd, n)), 5.);
       vec3 c = x + tr * (H / max(tr.y, 0.05));
@@ -266,11 +297,14 @@ void main(){
       float vine = smoothstep(0.55, 0.8, vnoise(cd * 11.) * 0.7 + vnoise(cd * 29. + 3.) * 0.3) * rim;
       float fo = foliage(c.xz);
       // leaves against the daylight: near-black silhouettes, a little green where the light comes through them
-      vec3 sky = mix(vec3(0.02, 0.05, 0.015) + vec3(0.1, 0.3, 0.05) * smoothstep(0.2, 0.9, fo), vec3(22., 24., 25.), smoothstep(0.35, 0.65, fo) * (1. - vine * 0.9));
+      float cr = length(c.xz) / HOLE;
+      vec3 day = mix(vec3(3.2, 3.5, 3.7), vec3(0.8, 1.1, 1.5), smoothstep(0.0, 0.85, cr));   // pale sky, bluer towards the rim
+      vec3 leaf = vec3(0.05, 0.11, 0.04) + vec3(0.25, 0.5, 0.12) * smoothstep(0.1, 0.6, fo);   // leaves glow green against the light
+      vec3 sky = mix(leaf, day, smoothstep(0.35, 0.65, fo) * (1. - vine * 0.9));
       // the roof: dark rock, lit a little from the bright pool below and the hole's edge
       float near = exp(-max(length(c.xz) - HOLE, 0.) / 2.5);
       vec3 roof = rockAlbedo(c) * (0.015 + 0.25 * near) * vec3(0.8, 0.85, 0.75);
-      col = mix(roof, sky, hm) * (1. - F) + AMB * F;
+      col = mix(roof, sky, hm) * (1. - F) + veil(x, reflect(rd, n), 22., jit) * F;
     }
   } else {
     vec3 n = kind == 1 ? floorN(x.xz) : normalize(vec3(-x.x, 0., -x.z) + 0.35 * vec3(fbm(x.yz * 0.7) - 0.5, fbm(x.xy * 0.6) - 0.5, fbm(x.xz * 0.7) - 0.5));
@@ -280,11 +314,87 @@ void main(){
     // bounce: the sunlit patch of floor lights the cave a little
     float bounce = 0.04 * exp(-length(x.xz - u) / 9.);
     vec3 al = rockAlbedo(x);
-    col = al * (Ls * dl + AMB * (1. + 0.5 * n.y) + SUN * bounce * vec3(0.3, 0.7, 0.9) * 0.05);
+    vec3 toHole = normalize(-x);
+    col = al * (Ls * dl + skyAt(x) * (0.25 + 0.75 * max(dot(n, toHole), 0.)) + AMB * (1. + 0.5 * n.y) + SUN * bounce * vec3(0.3, 0.7, 0.9) * 0.05);
     // crevices are darker
-    col *= 0.6 + 0.4 * smoothstep(0.2, 0.7, fbm(x.xz * 2.5 + x.y));
+    col *= 0.45 + 0.55 * smoothstep(0.25, 0.7, fbm(x.xz * 2.5 + x.y)) * (0.7 + 0.3 * smoothstep(0.3, 0.6, fbm(x.xz * 0.9 - 3.)));
   }
   col = col * T + sc;
+
+  float pa = max(length(dFdx(rd)), length(dFdy(rd)));     // the angle one pixel covers
+  // drifting specks close to the lens: one in each cell of a 0.55 m grid, walked along the ray
+  {
+    const float CS = 0.55;
+    vec3 p = ro / CS;
+    vec3 cell = floor(p);
+    vec3 st = sign(rd);
+    vec3 tD = abs(1. / max(abs(rd), 1e-5));
+    vec3 tN = (cell + max(st, 0.) - p) / rd * CS;
+    tD *= CS;
+    for (int i = 0; i < 26; i++){
+      if (i >= uSpk) break;
+      vec3 h = vec3(hash13(cell), hash13(cell + 17.3), hash13(cell + 41.9));
+      if (h.x < 0.7){
+        vec3 f = fract(h + vec3(0.05 * sin(uT * 0.3 + h.y * 6.), -uT * 0.025 * (0.5 + h.z), 0.05 * cos(uT * 0.25 + h.x * 6.)));
+        vec3 q = (cell + 0.1 + 0.8 * f) * CS;
+        float t = dot(q - ro, rd);
+        if (t > 0.05 && t < tEnd){
+          float d = length(ro + rd * t - q);
+          float rad = 0.0025 + 0.004 * h.y;
+          float blur = max(pa * t * 0.9, max(rad, 0.025 * max(0., 1. - t / 0.9)));   // out of focus very near the lens
+          float a = (rad * rad) / (blur * blur) * exp(-d * d / (blur * blur));
+          a *= smoothstep(0., 0.08, f.y) * smoothstep(1., 0.92, f.y);
+          if (a > 0.003){
+          vec2 u;
+          vec3 L = sunAt(q, u) * (hg(dot(r0, -rd), 0.6) * 4. + 0.15) + skyAt(q) * 0.4 + AMB * 2.;
+          col += L * a * 0.6 * exp(-SIGT * t);
+          }
+        }
+      }
+      if (tN.x < tN.y && tN.x < tN.z){ cell.x += st.x; tN.x += tD.x; }
+      else if (tN.y < tN.z){ cell.y += st.y; tN.y += tD.y; }
+      else { cell.z += st.z; tN.z += tD.z; }
+    }
+  }
+  // bubbles rising from a diver below, wobbling, in little bursts
+  if (uBub.w > 0.){
+    float best = 1e9; vec3 bc = vec3(0.), bS = vec3(1.); float br = 0.;
+    for (int i = 0; i < 28; i++){
+      float fi = float(i);
+      float burst = floor(fi / 7.);
+      float v = 0.55 + 0.25 * hash12(vec2(fi, 3.));
+      float L = -uBub.z + 0.2;
+      float y = uBub.z + mod(uT * v + burst * L * 0.27 + 0.12 * hash12(vec2(fi, 9.)), L);
+      float up = y - uBub.z;
+      float r = (0.01 + 0.022 * hash12(vec2(fi, 5.))) * (1. + up * 0.03);     // they grow as they rise
+      vec3 c = vec3(uBub.x, y, uBub.y) + vec3(0.06 * sin(uT * 7. * v + fi * 2.), 0., 0.06 * cos(uT * 6. * v + fi * 3.))
+             + vec3(hash12(vec2(fi, 1.)) - 0.5, 0., hash12(vec2(fi, 2.)) - 0.5) * (0.12 + up * 0.02);
+      // the bigger ones flatten into wobbling caps
+      float sq = 1. - 0.35 * smoothstep(0.012, 0.035, r) * (0.8 + 0.2 * sin(uT * 9. + fi));
+      vec3 S = vec3(1., 1. / sq, 1.);
+      vec3 oc = (ro - c) * S, rs = rd * S;
+      float aa = dot(rs, rs), bb = dot(oc, rs), cc = dot(oc, oc) - r * r;
+      float disc = bb * bb - aa * cc;
+      if (disc > 0. && y < -0.05){
+        float t = (-bb - sqrt(disc)) / aa;
+        if (t > 0.05 && t < best && t < tEnd){ best = t; bc = c; br = r; bS = S; }
+      }
+    }
+    if (best < 1e8){
+      vec3 nb = normalize((ro + rd * best - bc) * bS * bS);
+      float cs = max(dot(nb, -rd), 0.);
+      vec2 u;
+      vec3 env = sunAt(bc, u) * 0.3 + skyAt(bc) * 2. + AMB * 4.;
+      // seen from the water, a bubble is a mirror at its edge (total reflection), a lens in the middle,
+      // with a dark ring between, and a hot spot where it faces the window above
+      float rim = smoothstep(0.42, 0.08, cs);
+      float ring = smoothstep(0.3, 0.45, cs) * smoothstep(0.75, 0.5, cs);
+      float top = pow(max(dot(nb, normalize(vec3(-bc.x, -bc.y, -bc.z) * 0.1 + vec3(0., 1., 0.))), 0.), 24.);
+      vec3 mir = env + vec3(0.25, 0.4, 0.5) * (0.3 + 0.7 * smoothstep(-0.3, 0.8, nb.y));   // the edge mirrors the bright water and the window
+      vec3 bub = col * (0.8 - 0.5 * ring) + mir * (0.08 + rim * 1.8) + env * top * 6.;
+      col = mix(col, bub, uBub.w);
+    }
+  }
   if (uDbg == 1) col = vec3(textureLod(uCaus, vUv, 0.).r * 0.2);
   outColor = vec4(col, 1.);     // linear; bloom and tone mapping happen in post
 }`;
@@ -321,8 +431,10 @@ out vec4 outColor;
 float hash12(vec2 p){ vec3 p3 = fract(vec3(p.xyx) * .1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
 vec3 aces(vec3 x){ return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0., 1.); }
 void main(){
-  vec3 c = texture(uSrc, vUv).rgb * uExp + texture(uBloom, vUv).rgb * 0.35;
+  // the dome port of a dive camera: colours part slightly towards the corners
   vec2 q = vUv - 0.5;
+  vec2 ca = q * dot(q, q) * 0.012;
+  vec3 c = vec3(texture(uSrc, vUv + ca).r, texture(uSrc, vUv).g, texture(uSrc, vUv - ca).b) * uExp + texture(uBloom, vUv).rgb * 0.35;
   c *= 1. - 0.35 * dot(q, q) * 2.;                 // a little vignette, like a dive camera
   c = pow(aces(c), vec3(1. / 2.2));
   c += (hash12(gl_FragCoord.xy + fract(uT * 7.) * 100.) - 0.5) * 0.012;

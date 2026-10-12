@@ -35,8 +35,10 @@ const uniforms = {
   uInvVP: { value: new THREE.Matrix4() },
   uCam: { value: camera.position },
   uSteps: { value: RENDER ? 96 : (PHONE ? 28 : 40) },
+  uSpk: { value: RENDER ? 26 : (PHONE ? 10 : 12) },
   uDbg: { value: Number(params.get('dbg') || 0) },
   uRip: { value: Array.from({ length: 32 }, () => new THREE.Vector4(0, 0, -99, 0)) },
+  uBub: { value: new THREE.Vector4(0, 0, -14, 0) },
 };
 const causMat = new THREE.ShaderMaterial({
   glslVersion: THREE.GLSL3, uniforms, vertexShader: common + causVert, fragmentShader: causFrag,
@@ -69,22 +71,31 @@ function look(p, t, roll = 0) {
   camera.up.set(Math.sin(roll), Math.cos(roll), 0);
   camera.lookAt(t[0], t[1], t[2]);
 }
+// a diver holding the camera floats: a slow rise and fall with each breath, and a little drift and roll
+function float(t) {
+  camera.position.y += 0.09 * Math.sin(t * 1.4) + 0.03 * Math.sin(t * 3.1 + 1);
+  camera.position.x += 0.04 * Math.sin(t * 0.9 + 2);
+  camera.rotateZ(0.012 * Math.sin(t * 0.8) + 0.004 * Math.sin(t * 2.3));
+  camera.rotateX(0.008 * Math.sin(t * 1.4 + 0.6));
+}
 const lerp = (a, b, k) => a.map((v, i) => v + (b[i] - v) * k);
 const ease = (k) => k * k * (3 - 2 * k);
 // film: five shots of 3 s
 const SHOTS = [
-  { t0: 0, f: (u) => look(lerp([0.9, -11.6, 0.8], [0.6, -11.2, 0.5], u / 3), [-2.6, -0.5, -2]) },               // looking up into the beams
-  { t0: 10, f: (u) => look(lerp([4.5, -5, 4.2], [4.2, -7.5, 3.8], ease(u / 3)), [-2.4, -11.5, -2.2]) },             // sinking alongside the light
-  { t0: 20, f: (u) => look(lerp([3.5, -13.2, 3], [3.1, -13.1, 2.6], u / 3), [-2.6, -4, -2.2]) },              // from the rocks below, up the beams
-  { t0: 30, exp: 0.6, f: (u) => look(lerp([-0.6, -7, -0.4], [-0.6, -7.3, -0.4], u / 3), [-2.1, 1, -2.4], 0.25 * u) },   // straight up: the window of daylight
-  { t0: 1.5, f: (u) => look(lerp([0.8, -11.5, 0.7], [0.5, -11.1, 0.4], u / 3), [-2.6, -0.5, -2]) },           // back to the opening
+  { t0: 0, bub: [-0.4, -0.3, -14], f: (u) => look(lerp([0.9, -11.6, 0.8], [0.6, -11.2, 0.5], u / 3), [-2.6, -0.5, -2]) },               // looking up into the beams
+  { t0: 10, exp: 1.5, bub: [-7.0, -6.6, -16], f: (u) => look(lerp([-8.6, -5.4, -8.2], [-8.0, -7.6, -7.6], ease(u / 3)), [-3.4, -10.8, -3.0]) },             // sinking alongside the light, down to where it lands
+  { t0: 20, bub: [2.0, 1.5, -15], f: (u) => look(lerp([3.5, -13.2, 3], [3.1, -13.1, 2.6], u / 3), [-2.6, -4, -2.2]) },              // from the rocks below, up the beams
+  { t0: 30, exp: 0.8, bub: [-0.35, -0.65, -8], f: (u) => look(lerp([-0.6, -7, -0.4], [-0.6, -7.3, -0.4], u / 3), [-2.1, 1, -2.4], 0.25 * u) },   // straight up: the window of daylight
+  { t0: 1.5, bub: [-0.4, -0.3, -14], f: (u) => look(lerp([0.8, -11.5, 0.7], [0.5, -11.1, 0.4], u / 3), [-2.6, -0.5, -2]) },           // back to the opening
 ];
 const SHOT_LEN = 3, FILM_LEN = SHOTS.length * SHOT_LEN;
 function filmAt(t) {
   const i = Math.min(SHOTS.length - 1, Math.floor(t / SHOT_LEN));
   const u = t - i * SHOT_LEN;
   SHOTS[i].f(u);
+  float(SHOTS[i].t0 + u);
   uExp.value = SHOTS[i].exp || 2.4;
+  const b = SHOTS[i].bub; uniforms.uBub.value.set(b[0], b[1], b[2], 1);
   return { scene: SHOTS[i].t0 + u, shot: i };
 }
 
@@ -127,7 +138,7 @@ if (RENDER) {
   // the page: Up / Down, and a finger on the water (seen from below) makes rings that bend the shafts
   const VIEWS = {
     up: { p: [0.8, -11.4, 0.7], t: [-2.6, -0.5, -2] },
-    down: { p: [1.4, -5, 2.8], t: [-2.4, -13, -2.2] },
+    down: { p: [-8.2, -6.2, -7.8], t: [-3.4, -10.8, -3.0] },
   };
   let view = 'up', wide = false;
   const cp = new THREE.Vector3(...VIEWS.up.p), ct = new THREE.Vector3(...VIEWS.up.t);
@@ -176,6 +187,10 @@ if (RENDER) {
     cp.lerp(new THREE.Vector3(...V.p), k); ct.lerp(new THREE.Vector3(...V.t), k);
     const sway = [0.4 * Math.sin(t * 0.21), 0.25 * Math.sin(t * 0.17), 0.4 * Math.cos(t * 0.19)];
     look([cp.x + sway[0], cp.y + sway[1], cp.z + sway[2]], [ct.x, ct.y + (wide && view === 'up' ? 4 : 0), ct.z]);   // landscape: keep the whole opening in frame
+    float(t);
+    uExp.value += ((view === 'down' ? 1.5 : 2.4) - uExp.value) * k;
+    const hx = ct.x - cp.x, hz = ct.z - cp.z, hl = Math.hypot(hx, hz) || 1;
+    uniforms.uBub.value.set(cp.x + 1.6 * hx / hl + 0.5, cp.z + 1.6 * hz / hl - 0.5, cp.y - 3, 1);   // bubbles rising just in front of you
     draw(now);
   });
 }
